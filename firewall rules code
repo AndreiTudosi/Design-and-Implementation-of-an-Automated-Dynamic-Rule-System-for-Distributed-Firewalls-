@@ -1,0 +1,81 @@
+import re
+import requests
+import time
+import urllib3
+from datetime import datetime, timedelta
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+open("C:/Users/Desktop/logs.txt", "w").close()
+
+api_url = "https://192.168.3.100:8500/api/v1/firewall/rule"
+api_log_url = "https://192.168.3.100:8500/api/v1/status/log/system"
+api_username = "admin"
+api_password = "121212"
+rules_created = []
+
+interval = 60
+flag = True
+count_line = 0
+
+
+while flag:
+request_log = requests.get(api_log_url, auth=(api_username, api_password), verify=False)
+logs = request_log.json()
+text_file = open("C:/Users/Desktop/logs.txt", "w")
+for i in logs["data"]:
+text_file.write(i + "\n")
+
+text_file.close()
+
+x = len(open("C:/Users/Desktop/logs.txt").readlines())
+with open("C:/Users/Desktop/logs.txt") as log_file:
+for line in log_file:
+count_line += 1
+if count_line >= x:
+print("count over limit")
+if "pfSense snort" in line:
+match = re.search(r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)", line)
+ip_address = match.group(1)
+port = match.group(2)
+
+already_blocked = False
+r = requests.get(api_url, auth=(api_username, api_password), verify=False)
+rules = r.json()
+count_rules = len(rules["data"])
+for i in range(0, count_rules):
+if "address" in rules["data"][i]["source"]:
+if rules["data"][i]["source"]["address"] == ip_address:
+already_blocked = True
+break
+if not already_blocked:
+json_obj = {
+"type": "block",
+"interface": "wan",
+"ipprotocol": "inet",
+"src": ip_address,
+"srcport": "any",
+"dst": "any",
+"descr": "test",
+"apply": True,
+"protocol": "any"
+}
+requests.post(api_url, json=json_obj, auth=(api_username, api_password), verify=False)
+r = requests.get(api_url, auth=(api_username, api_password), verify=False)
+rules = r.json()
+count_rules = len(rules["data"])
+for i in range(0, count_rules):
+if "address" in rules["data"][i]["source"]:
+if rules["data"][i]["source"]["address"] == ip_address:
+tracker = rules["data"][i]["tracker"]
+now = datetime.now()
+duration = timedelta(hours=24)
+time_24_hours_ahead = now + duration
+rules_created.append((ip_address, tracker, time_24_hours_ahead))
+break
+for j in range(len(rules_created)):
+if rules_created[j][2] < datetime.now():		requests.delete(api_url, json={"tracker": rules_created[j][1], "apply": True}, auth=(api_username, api_password),verify=False)
+rules_created.pop(j)
+
+count_line = 0
+open("C:/Users/Desktop/logs.txt", "w").close()
+time.sleep(interval)
